@@ -1,0 +1,3 @@
+make -f tensorflow/lite/micro/tools/make/Makefile TARGET=xtensa_gcc  TARGET_ARCH=xtensa-cnl APP=sof micro_speech_lib -j
+
+xtensa-cnl-elf-ld -e app_main -L /home/lrg/work/sof/xtensa-cnl-elf/xtensa-cnl-elf/lib/ -r main/libmicro_speech.a tfmicro/libtensorflow-microlite.a -lstdc++ -S -o test.a

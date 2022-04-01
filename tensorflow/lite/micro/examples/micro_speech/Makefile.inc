@@ -265,6 +265,11 @@ $(COMMAND_RESPONDER_TEST_SRCS),$(COMMAND_RESPONDER_TEST_HDRS)))
 $(eval $(call microlite_test,micro_speech,\
 $(MICRO_SPEECH_SRCS),$(MICRO_SPEECH_HDRS),$(MICRO_SPEECH_GENERATOR_INPUTS)))
 
+# Builds a standalone speech command recognizer library.
+$(eval $(call microlite_lib,micro_speech_lib,\
+$(MICRO_SPEECH_SRCS),$(MICRO_SPEECH_HDRS),$(MICRO_SPEECH_GENERATOR_INPUTS)))
+
+
 # Builds a standalone speech command recognizer binary using fake audio input.
 $(eval $(call microlite_test,micro_speech_mock,\
 $(MICRO_SPEECH_MOCK_SRCS),$(MICRO_SPEECH_MOCK_HDRS),$(MICRO_SPEECH_GENERATOR_INPUTS)))
