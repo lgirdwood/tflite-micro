@@ -79,6 +79,8 @@ endif
 
 endef
 
+# SOF Part starts here
+#
 # Handles the details of generating a binary target, including specializing
 # for the current platform, and generating project file targets.
 #
@@ -120,13 +122,14 @@ $$(patsubst %.S,%.o,$$(patsubst %.cc,%.o,$$(patsubst %.c,%.o,$$($(1)_LOCAL_SRCS)
 $(1)_BINARY := $$(BINDIR)$(1)
 $$($(1)_BINARY): $$($(1)_LOCAL_OBJS) $$(MICROLITE_LIB_PATH)
 	@mkdir -p $$(dir $$@)
+	echo  "!!!!!!! Ranjani - hard coded PATH below. Pls work around"
 	$(LD) -e app_main \
 	-L /home/lrg/work/sof/xtensa-cnl-elf/xtensa-cnl-elf/lib/ \
 	-r \
 	$$($(1)_LOCAL_OBJS) \
 	$$(MICROLITE_LIB_PATH) \
 	$$(MICROLITE_LIBS) \
-	-lstdc++ -S \
+	-lstdc++ -S -lm \
 	-o test.a
 
 $(1): $$($(1)_BINARY)
