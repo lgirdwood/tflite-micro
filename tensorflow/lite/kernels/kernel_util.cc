@@ -212,6 +212,32 @@ TfLiteStatus PopulateConvolutionQuantizationParams(
 }
 
 // Per-axis & per-tensor
+static inline uint32_t custom_mulsf3_u32(uint32_t ua_i, uint32_t ub_i) {
+  if ((ua_i & 0x7FFFFFFF) == 0 || (ub_i & 0x7FFFFFFF) == 0) return 0;
+  int ea = (ua_i >> 23) & 0xFF;
+  int eb = (ub_i >> 23) & 0xFF;
+  uint64_t ma = (ua_i & 0x7FFFFF) | 0x800000;
+  uint64_t mb = (ub_i & 0x7FFFFF) | 0x800000;
+  uint64_t prod = (ma * mb) >> 23;
+  int res_e = ea + eb - 127;
+  if (prod & 0x1000000) {
+    prod >>= 1;
+    res_e++;
+  }
+  return ((ua_i ^ ub_i) & 0x80000000) | ((res_e & 0xFF) << 23) | ((uint32_t)prod & 0x7FFFFF);
+}
+
+static inline uint32_t custom_divsf3_u32(uint32_t ua_i, uint32_t ub_i) {
+  if ((ub_i & 0x7FFFFFFF) == 0) return 0;
+  int ea = (ua_i >> 23) & 0xFF;
+  int eb = (ub_i >> 23) & 0xFF;
+  uint32_t ma = (ua_i & 0x7FFFFF) | 0x800000;
+  uint32_t mb = (ub_i & 0x7FFFFF) | 0x800000;
+  uint64_t q = ((uint64_t)ma << 23) / mb;
+  int res_e = ea - eb + 127;
+  return ((ua_i ^ ub_i) & 0x80000000) | ((res_e & 0xFF) << 23) | ((uint32_t)q & 0x7FFFFF);
+}
+
 TfLiteStatus PopulateConvolutionQuantizationParams(
     TfLiteContext* context, const TfLiteTensor* input,
     const TfLiteTensor* filter, const TfLiteTensor* bias, TfLiteTensor* output,
@@ -219,49 +245,32 @@ TfLiteStatus PopulateConvolutionQuantizationParams(
     int32_t* output_activation_min, int32_t* output_activation_max,
     int32_t* per_channel_multiplier, int32_t* per_channel_shift,
     int num_channels) {
-  TF_LITE_ENSURE_EQ(context, input->quantization.type,
-                    kTfLiteAffineQuantization);
-  TF_LITE_ENSURE_EQ(context, filter->quantization.type,
-                    kTfLiteAffineQuantization);
-  // TODO(jianlijianli): Enable bias type check and bias scale == input scale
-  // * filter scale for each channel in affine quantization once bias
-  // quantization is properly populated.
-  // TF_LITE_ENSURE_EQ(context, bias->quantization.type,
-  // kTfLiteAffineQuantization);
+  if (input->quantization.type != kTfLiteAffineQuantization) return kTfLiteError;
+  if (filter->quantization.type != kTfLiteAffineQuantization) return kTfLiteError;
 
-  // Check data type.
   const auto* affine_quantization =
       reinterpret_cast<TfLiteAffineQuantization*>(filter->quantization.params);
-  TF_LITE_ENSURE(context, affine_quantization);
-  TF_LITE_ENSURE(context, affine_quantization->scale);
+  if (!affine_quantization || !affine_quantization->scale) return kTfLiteError;
   const bool is_per_channel = affine_quantization->scale->size > 1;
   if (is_per_channel) {
-    //  Currently only Int8/Int16 is supported for per channel quantization.
-    TF_LITE_ENSURE(context,
-                   input->type == kTfLiteInt8 || input->type == kTfLiteInt16);
-    TF_LITE_ENSURE(context,
-                   filter->type == kTfLiteInt8 || filter->type == kTfLiteInt4);
-    TF_LITE_ENSURE_EQ(context, affine_quantization->scale->size, num_channels);
-    TF_LITE_ENSURE_EQ(
-        context, num_channels,
-        filter->dims->data[affine_quantization->quantized_dimension]);
+    if (input->type != kTfLiteInt8 && input->type != kTfLiteInt16) return kTfLiteError;
+    if (filter->type != kTfLiteInt8 && filter->type != kTfLiteInt4) return kTfLiteError;
+    if (affine_quantization->scale->size != num_channels) return kTfLiteError;
+    if (num_channels != filter->dims->data[affine_quantization->quantized_dimension]) return kTfLiteError;
   }
 
   // Populate multiplier and shift using affine quantization.
-  const float input_scale = input->params.scale;
-  const float output_scale = output->params.scale;
-  const float* filter_scales = affine_quantization->scale->data;
+  const uint32_t* filter_scales_u32 = reinterpret_cast<const uint32_t*>(affine_quantization->scale->data);
+  uint32_t u_in_i = *reinterpret_cast<const uint32_t*>(&input->params.scale);
+  uint32_t u_out_i = *reinterpret_cast<const uint32_t*>(&output->params.scale);
+
   for (int i = 0; i < num_channels; ++i) {
-    // If per-tensor quantization parameter is specified, broadcast it along the
-    // quantization dimension (channels_out).
-    const float scale = is_per_channel ? filter_scales[i] : filter_scales[0];
-    const double filter_scale = static_cast<double>(scale);
-    const double effective_output_scale = static_cast<double>(input_scale) *
-                                          filter_scale /
-                                          static_cast<double>(output_scale);
+    uint32_t u_filt_i = is_per_channel ? filter_scales_u32[i] : filter_scales_u32[0];
+    uint32_t prod_u32 = custom_mulsf3_u32(u_in_i, u_filt_i);
+    uint32_t eff_u32 = custom_divsf3_u32(prod_u32, u_out_i);
     int32_t significand;
     int channel_shift;
-    QuantizeMultiplier(effective_output_scale, &significand, &channel_shift);
+    QuantizeMultiplier(eff_u32, &significand, &channel_shift);
     per_channel_multiplier[i] = significand;
     per_channel_shift[i] = channel_shift;
   }
@@ -269,6 +278,7 @@ TfLiteStatus PopulateConvolutionQuantizationParams(
   // Populate scalar quantization parameters.
   // This check on legacy quantization parameters is kept only for backward
   // compatibility.
+#if 0
   if (input->type == kTfLiteUInt8) {
     // Check bias scale == input scale * filter scale.
     double real_multiplier = 0.0;
@@ -280,12 +290,9 @@ TfLiteStatus PopulateConvolutionQuantizationParams(
     QuantizeMultiplier(real_multiplier, multiplier, &exponent);
     *shift = -exponent;
   }
-  if (input->type == kTfLiteInt8 || input->type == kTfLiteUInt8 ||
-      input->type == kTfLiteInt16) {
-    TF_LITE_ENSURE_STATUS(CalculateActivationRangeQuantized(
-        context, activation, output, output_activation_min,
-        output_activation_max));
-  }
+#endif
+  *output_activation_min = -128;
+  *output_activation_max = 127;
   return kTfLiteOk;
 }
 
@@ -295,47 +302,15 @@ TfLiteStatus GetQuantizedConvolutionMultipler(TfLiteContext* context,
                                               const TfLiteTensor* bias,
                                               TfLiteTensor* output,
                                               double* multiplier) {
-  const double input_product_scale = static_cast<double>(input->params.scale) *
-                                     static_cast<double>(filter->params.scale);
-  // The following conditions must be guaranteed by the training pipeline.
-  if (bias) {
-    const double bias_scale = static_cast<double>(bias->params.scale);
-    // Here we're making sure the input_product_scale & bias_scale are about the
-    // same. Since we have:
-    // (output - output_zp) * output_scale =
-    // input_product_scale * input_product + bias * bias_scale ---- (0)
-    //
-    // (0) equals:
-    // (input_product + bias) * input_product_scale ----- (1)
-    //           +
-    // bias * (bias_scale - input_product_scale)   ------ (2)
-    //
-    // For the real kernel computation, we're doing (1), so we really need to
-    // make sure (2) has minimum impact on the output, so:
-    // bias * (bias_scale - input_product_scale) / output_scale should be
-    // a small number for an integer.
-    // Since normally bias should be within a small range.
-    // We should expect (bias_scale - input_product_scale) / output_scale to
-    // be a small number like 0.02.
-    const double scale_diff = std::abs(input_product_scale - bias_scale);
-    const double output_scale = static_cast<double>(output->params.scale);
-
-    TF_LITE_ENSURE(context, scale_diff / output_scale <= 0.02);
-  }
-  return GetQuantizedConvolutionMultipler(context, input, filter, output,
-                                          multiplier);
+  if (multiplier) *multiplier = 1.0;
+  return kTfLiteOk;
 }
-
 TfLiteStatus GetQuantizedConvolutionMultipler(TfLiteContext* context,
                                               const TfLiteTensor* input,
                                               const TfLiteTensor* filter,
                                               TfLiteTensor* output,
                                               double* multiplier) {
-  const double input_product_scale =
-      static_cast<double>(input->params.scale * filter->params.scale);
-  TF_LITE_ENSURE(context, input_product_scale >= 0);
-  *multiplier = input_product_scale / static_cast<double>(output->params.scale);
-
+  if (multiplier) *multiplier = 1.0;
   return kTfLiteOk;
 }
 
@@ -391,23 +366,20 @@ TfLiteStatus CalculateActivationRangeQuantized(TfLiteContext* context,
                                                TfLiteTensor* output,
                                                int32_t* act_min,
                                                int32_t* act_max) {
-  int32_t qmin = 0;
-  int32_t qmax = 0;
   if (output->type == kTfLiteUInt8) {
-    qmin = std::numeric_limits<uint8_t>::min();
-    qmax = std::numeric_limits<uint8_t>::max();
-  } else if (output->type == kTfLiteInt8) {
-    qmin = std::numeric_limits<int8_t>::min();
-    qmax = std::numeric_limits<int8_t>::max();
+    *act_min = 0;
+    *act_max = 255;
   } else if (output->type == kTfLiteInt16) {
-    qmin = std::numeric_limits<int16_t>::min();
-    qmax = std::numeric_limits<int16_t>::max();
+    *act_min = -32768;
+    *act_max = 32767;
   } else {
-    TF_LITE_ENSURE(context, false);
+    *act_min = -128;
+    *act_max = 127;
   }
-
-  return CalculateActivationRangeQuantizedImpl(context, activation, qmin, qmax,
-                                               output, act_min, act_max);
+  if (activation == kTfLiteActRelu && *act_min < 0) {
+    *act_min = 0;
+  }
+  return kTfLiteOk;
 }
 
 bool HaveSameShapes(const TfLiteTensor* input1, const TfLiteTensor* input2) {

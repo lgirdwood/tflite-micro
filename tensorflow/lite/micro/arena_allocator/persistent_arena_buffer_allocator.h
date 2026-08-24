@@ -34,10 +34,10 @@ class PersistentArenaBufferAllocator : public IPersistentBufferAllocator {
 
   // Allocates persistent memory. The persistent buffer is never freed.
   // Returns nullptr if errors occured.
-  uint8_t* AllocatePersistentBuffer(size_t size, size_t alignment) override;
+  virtual uint8_t* AllocatePersistentBuffer(size_t size, size_t alignment) override;
 
   // Returns the size of all persistent allocations in bytes.
-  size_t GetPersistentUsedBytes() const override;
+  virtual size_t GetPersistentUsedBytes() const override;
 
   TF_LITE_REMOVE_VIRTUAL_DELETE
  private:

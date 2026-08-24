@@ -193,7 +193,7 @@ void QuantizeMultiplierGreaterThanOne(double double_multiplier,
 // basically the 'floating-point exponent' of the multiplier:
 // Negative for a right-shift (when the multiplier is <1), positive for a
 // left-shift (when the multiplier is >1)
-void QuantizeMultiplier(double double_multiplier, int32_t* quantized_multiplier,
+void QuantizeMultiplier(uint32_t float_multiplier_u32, int32_t* quantized_multiplier,
                         int* shift);
 
 // Splits a double input value into a returned fraction, and a shift value from

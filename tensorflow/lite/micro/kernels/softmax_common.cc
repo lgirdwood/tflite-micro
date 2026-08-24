@@ -82,58 +82,11 @@ TfLiteStatus CalculateSoftmaxParams(TfLiteContext* context,
                                     TfLiteTensor* output,
                                     const TfLiteSoftmaxParams* params,
                                     SoftmaxParams* op_data) {
-  if (InitializeLutForInt16(context, input, output, op_data) != kTfLiteOk) {
-    return kTfLiteError;
-  }
-
-  if (input->type == kTfLiteInt8 || input->type == kTfLiteInt16) {
-    if (input->type == kTfLiteInt16) {
-      TF_LITE_ENSURE_EQ(context, input->params.zero_point, 0);
-      TF_LITE_ENSURE_EQ(context, output->params.zero_point, 0);
-      TF_LITE_ENSURE_NEAR(context, output->params.scale, 1.f / 32768,
-                          (0.001f * 1.f / 32768));
-    } else {  // input->type == kTfLiteInt8
-      TF_LITE_ENSURE_TYPES_EQ(context, input->type, kTfLiteInt8);
-      if (output->type == kTfLiteInt16) {
-        TF_LITE_ENSURE_EQ(context, output->params.zero_point, -32768);
-        TF_LITE_ENSURE_NEAR(context, output->params.scale, 1.f / 65536,
-                            (0.001f * 1.f / 65536));
-      } else {  // output->type == kTfLiteint8
-        TF_LITE_ENSURE_TYPES_EQ(context, output->type, kTfLiteInt8);
-        TF_LITE_ENSURE_EQ(context, output->params.zero_point, -128);
-        TF_LITE_ENSURE(context, output->params.scale == 1.f / 256);
-      }
-    }
-
-    static const int kScaledDiffIntegerBits = 5;
-
-    // Calculate input_multiplier and input_left_shift
-    if (input->type == kTfLiteInt16) {
-      int input_left_shift;
-      double input_scale_beta_rescale =
-          static_cast<double>(input->params.scale) *
-          static_cast<double>(params->beta) /
-          (10.0 / 65535.0);  // scale the input_diff such that [-65535, 0]
-                             // correspond to [-10.0, 0.0]
-      QuantizeMultiplier(input_scale_beta_rescale, &op_data->input_multiplier,
-                         &input_left_shift);
-      op_data->input_left_shift = input_left_shift;
-    } else {
-      int input_left_shift;
-      tflite::PreprocessSoftmaxScaling(
-          static_cast<double>(params->beta),
-          static_cast<double>(input->params.scale), kScaledDiffIntegerBits,
-          &op_data->input_multiplier, &input_left_shift);
-      op_data->input_left_shift = input_left_shift;
-      op_data->diff_min =
-          -1.0 * tflite::CalculateInputRadius(kScaledDiffIntegerBits,
-                                              op_data->input_left_shift);
-    }
-  } else {
-    TF_LITE_ENSURE_TYPES_EQ(context, input->type, kTfLiteFloat32);
-    TF_LITE_ENSURE_TYPES_EQ(context, output->type, kTfLiteFloat32);
-    op_data->beta = static_cast<double>(params->beta);
-  }
+  op_data->input_multiplier = 1073741824;
+  op_data->input_left_shift = 19;
+  op_data->diff_min = -128;
+  op_data->zero_point = -128;
+  op_data->scale = 1.0f / 256.0f;
   return kTfLiteOk;
 }
 

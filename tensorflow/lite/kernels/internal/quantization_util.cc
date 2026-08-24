@@ -50,57 +50,26 @@ constexpr uint32_t kFractionRoundingMask = 0x003fffff;
 constexpr uint32_t kFractionRoundingThreshold = 0x00200000;
 }  // namespace
 
-void QuantizeMultiplier(double double_multiplier, int32_t* quantized_multiplier,
+void QuantizeMultiplier(uint32_t float_multiplier_u32, int32_t* quantized_multiplier,
                         int* shift) {
-#if TFLITE_SINGLE_ROUNDING
-  // Single-rounding MultiplyByQuantizedMultiplier only supports positive
-  // multipliers.
-  // TFLITE_DCHECK(double_multiplier >= 0);
-#endif
-  if (double_multiplier == 0.) {
+  uint32_t u_i = float_multiplier_u32;
+  if ((u_i & 0x7FFFFFFF) == 0) {
     *quantized_multiplier = 0;
     *shift = 0;
     return;
   }
-#ifdef TFLITE_EMULATE_FLOAT
-  // If we're trying to avoid the use of floating-point instructions (for
-  // example on microcontrollers) then use an alternative implementation
-  // that only requires integer and bitwise operations. To enable this, you
-  // need to set the define during the build process for your platform.
-  int64_t q_fixed = IntegerFrExp(double_multiplier, shift);
-#else   // TFLITE_EMULATE_FLOAT
-  const double q = std::frexp(double_multiplier, shift);
-  auto q_fixed = static_cast<int64_t>(TfLiteRound(q * (1LL << 31)));
-#endif  // TFLITE_EMULATE_FLOAT
-  TFLITE_CHECK(q_fixed <= (1LL << 31));
-  if (q_fixed == (1LL << 31)) {
-    q_fixed /= 2;
-    ++*shift;
-  }
-  TFLITE_CHECK_LE(q_fixed, std::numeric_limits<int32_t>::max());
-  // A shift amount smaller than -31 would cause all bits to be shifted out
-  // and thus all results would be zero. We implement that instead with
-  // q_fixed==0, so as to avoid hitting issues with right-shift
-  // operations with shift amounts greater than 31. Note that this happens
-  // roughly when abs(double_multiplier) < 2^-31 and the present handling means
-  // that we're effectively flushing tiny double_multiplier's to zero.
-  // We could conceivably handle values in the range (roughly) [32, 63]
-  // as 'denormals' i.e. (shift==0, q_fixed < 2^30). In that point of view
-  // the present handling is just doing 'flush denormals to zero'. We could
-  // reconsider and actually generate nonzero denormals if a need arises.
-  if (*shift < -31) {
+  uint32_t sign = u_i & 0x80000000;
+  int e = (int)((u_i >> 23) & 0xFF);
+  if (e == 0) {
+    *quantized_multiplier = 0;
     *shift = 0;
-    q_fixed = 0;
+    return;
   }
-#if TFLITE_SINGLE_ROUNDING
-  // Single-rounding MultiplyByQuantizedMultiplier doesn't support a shift > 30,
-  // saturate it.
-  if (*shift > 30) {
-    *shift = 30;
-    q_fixed = (1LL << 31) - 1;
-  }
-#endif
-  *quantized_multiplier = static_cast<int32_t>(q_fixed);
+  *shift = e - 126;
+  uint32_t mantissa = (u_i & 0x007FFFFF) | 0x00800000;
+  int32_t q_fixed = (int32_t)(mantissa << 7);
+  if (sign) q_fixed = -q_fixed;
+  *quantized_multiplier = q_fixed;
 }
 
 void QuantizeMultiplierGreaterThanOne(double double_multiplier,

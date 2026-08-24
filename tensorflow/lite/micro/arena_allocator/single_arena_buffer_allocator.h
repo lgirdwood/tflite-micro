@@ -28,8 +28,7 @@ namespace tflite {
 // TODO(petewarden): This allocator never frees up or reuses  any memory, even
 // though we have enough information about lifetimes of the tensors to do so.
 // This makes it pretty wasteful, so we should use a more intelligent method.
-class SingleArenaBufferAllocator : public INonPersistentBufferAllocator,
-                                   public IPersistentBufferAllocator {
+class SingleArenaBufferAllocator : public IBufferAllocator {
  public:
   // TODO(b/157615197): Cleanup constructors/destructor and use factory
   // functions.

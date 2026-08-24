@@ -44,16 +44,13 @@ SingleArenaBufferAllocator::SingleArenaBufferAllocator(uint8_t* buffer,
 SingleArenaBufferAllocator* SingleArenaBufferAllocator::Create(
     uint8_t* buffer_head, size_t buffer_size) {
   TFLITE_DCHECK(buffer_head != nullptr);
-  SingleArenaBufferAllocator tmp =
-      SingleArenaBufferAllocator(buffer_head, buffer_size);
 
-  // Allocate enough bytes from the buffer to create a
-  // SingleArenaBufferAllocator. The new instance will use the current adjusted
-  // tail buffer from the tmp allocator instance.
-  uint8_t* allocator_buffer = tmp.AllocatePersistentBuffer(
-      sizeof(SingleArenaBufferAllocator), alignof(SingleArenaBufferAllocator));
-  // Use the default copy constructor to populate internal states.
-  return new (allocator_buffer) SingleArenaBufferAllocator(tmp);
+  size_t size = sizeof(SingleArenaBufferAllocator);
+  size_t alignment = alignof(SingleArenaBufferAllocator);
+  uint8_t* buffer_tail = buffer_head + buffer_size;
+  uint8_t* allocator_buffer = AlignPointerDown(buffer_tail - size, alignment);
+
+  return new (allocator_buffer) SingleArenaBufferAllocator(buffer_head, allocator_buffer);
 }
 
 SingleArenaBufferAllocator::~SingleArenaBufferAllocator() {}
@@ -108,6 +105,8 @@ TfLiteStatus SingleArenaBufferAllocator::ResizeBuffer(uint8_t* resizable_buf,
 uint8_t* SingleArenaBufferAllocator::AllocatePersistentBuffer(
     size_t size, size_t alignment) {
   uint8_t* const aligned_result = AlignPointerDown(tail_ - size, alignment);
+  MicroPrintf("[MWW ALLOC] AllocatePersistentBuffer head=%p tail=%p req=%u res=%p\n",
+              (void*)head_, (void*)tail_, (unsigned)size, (void*)aligned_result);
   if (aligned_result < head_) {
 #ifndef TF_LITE_STRIP_ERROR_STRINGS
     const size_t missing_memory = head_ - aligned_result;
@@ -125,7 +124,9 @@ uint8_t* SingleArenaBufferAllocator::AllocatePersistentBuffer(
 uint8_t* SingleArenaBufferAllocator::AllocateTemp(size_t size,
                                                   size_t alignment) {
   uint8_t* const aligned_result = AlignPointerUp(temp_, alignment);
-  const size_t available_memory = tail_ - aligned_result;
+  const size_t available_memory = (tail_ >= aligned_result) ? (tail_ - aligned_result) : 0;
+  MicroPrintf("[MWW ALLOC] AllocateTemp temp=%p tail=%p req=%u avail=%u\n",
+              (void*)temp_, (void*)tail_, (unsigned)size, (unsigned)available_memory);
   if (available_memory < size) {
     MicroPrintf(
         "Failed to allocate temp memory. Requested: %u, "
@@ -185,7 +186,7 @@ size_t SingleArenaBufferAllocator::GetAvailableMemory(size_t alignment) const {
 }
 
 size_t SingleArenaBufferAllocator::GetUsedBytes() const {
-  return GetPersistentUsedBytes() + GetNonPersistentUsedBytes();
+  return (buffer_tail_ - tail_) + std::max(head_ - buffer_head_, temp_ - buffer_head_);
 }
 
 size_t SingleArenaBufferAllocator::GetBufferSize() const {

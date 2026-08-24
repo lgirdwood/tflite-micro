@@ -32,39 +32,39 @@ class NonPersistentArenaBufferAllocator : public INonPersistentBufferAllocator {
   virtual ~NonPersistentArenaBufferAllocator();
 
   // Allocates a temporary buffer. This buffer is not resizable.
-  uint8_t* AllocateTemp(size_t size, size_t alignment) override;
+  virtual uint8_t* AllocateTemp(size_t size, size_t alignment) override;
 
   // Signals that a temporary buffer is no longer needed.
-  void DeallocateTemp(uint8_t* buf) override;
+  virtual void DeallocateTemp(uint8_t* buf) override;
 
   // Returns true if all temporary buffers are already deallocated.
-  bool IsAllTempDeallocated() override;
+  virtual bool IsAllTempDeallocated() override;
 
   // Signals that all temporary allocations can be reclaimed. TFLM calls this
   // API when it knows that all temporary buffers that it requested has been
   // deallocated.
-  TfLiteStatus ResetTempAllocations() override;
+  virtual TfLiteStatus ResetTempAllocations() override;
 
   // Returns a buffer that is resizable viable ResizeBuffer().
-  uint8_t* AllocateResizableBuffer(size_t size, size_t alignment) override;
+  virtual uint8_t* AllocateResizableBuffer(size_t size, size_t alignment) override;
 
   // Resizes a buffer that is previously returned by the
   // AllocateResizableBuffer.
-  TfLiteStatus ResizeBuffer(uint8_t* resizable_buf, size_t size,
+  virtual TfLiteStatus ResizeBuffer(uint8_t* resizable_buf, size_t size,
                             size_t alignment) override;
 
   // Frees up the memory occupied by the resizable buffer.
-  TfLiteStatus DeallocateResizableBuffer(uint8_t* resizable_buf) override;
+  virtual TfLiteStatus DeallocateResizableBuffer(uint8_t* resizable_buf) override;
 
   // Returns a pointer pointing to the start of the overlay memory, which is
   // used for activation tensors and scratch buffers by kernels at Invoke stage.
-  uint8_t* GetOverlayMemoryAddress() const override;
+  virtual uint8_t* GetOverlayMemoryAddress() const override;
 
   // Reserves the size of the overlay memory. This overlay is reserved for the
   // kernels at Invoke stage. This is referred to as the overlay because before
   // Invoket state, the same memory can be used for temp buffers. The layout of
   // the memory is planned by the memory planner separately at Invoke stage.
-  TfLiteStatus ReserveNonPersistentOverlayMemory(size_t size,
+  virtual TfLiteStatus ReserveNonPersistentOverlayMemory(size_t size,
                                                  size_t alignment) override;
 
   // Returns the size of non-persistent buffer in use.

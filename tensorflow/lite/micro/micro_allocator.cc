@@ -53,7 +53,7 @@ const TfLiteIntArray kZeroLengthIntArray = {};
 class MicroBuiltinDataAllocator : public TfLiteBridgeBuiltinDataAllocator {
  public:
   explicit MicroBuiltinDataAllocator(
-      IPersistentBufferAllocator* persistent_allocator)
+      SingleArenaBufferAllocator* persistent_allocator)
       : persistent_allocator_(persistent_allocator) {}
 
   void* Allocate(size_t size, size_t alignment_hint) override {
@@ -68,12 +68,12 @@ class MicroBuiltinDataAllocator : public TfLiteBridgeBuiltinDataAllocator {
   TF_LITE_REMOVE_VIRTUAL_DELETE
 
  private:
-  IPersistentBufferAllocator* persistent_allocator_;
+  SingleArenaBufferAllocator* persistent_allocator_;
 };
 
 MicroMemoryPlanner* CreateMemoryPlanner(
     MemoryPlannerType memory_planner_type,
-    IPersistentBufferAllocator* memory_allocator) {
+    SingleArenaBufferAllocator* memory_allocator) {
   MicroMemoryPlanner* memory_planner = nullptr;
   uint8_t* memory_planner_buffer = nullptr;
 
@@ -214,8 +214,8 @@ void* GetFlatbufferTensorBuffer(
 }
 
 TfLiteStatus InitializeTfLiteTensorFromFlatbuffer(
-    IPersistentBufferAllocator* persistent_buffer_allocator,
-    INonPersistentBufferAllocator* non_persistent_buffer_allocator,
+    SingleArenaBufferAllocator* persistent_buffer_allocator,
+    SingleArenaBufferAllocator* non_persistent_buffer_allocator,
     bool allocate_temp, const tflite::Tensor& flatbuffer_tensor,
     const flatbuffers::Vector<flatbuffers::Offset<Buffer>>* buffers,
     TfLiteTensor* result) {
@@ -261,12 +261,16 @@ TfLiteStatus InitializeTfLiteTensorFromFlatbuffer(
     result->dims = FlatBufferVectorToTfLiteTypeArray(flatbuffer_tensor.shape());
   }
 
-  // Copy the quantization information from the serialized data.
-  const auto* src_quantization = flatbuffer_tensor.quantization();
-  if (src_quantization && src_quantization->scale() &&
-      (src_quantization->scale()->size() > 0) &&
-      src_quantization->zero_point() &&
-      (src_quantization->zero_point()->size() > 0)) {
+  result->data.raw = nullptr;
+
+  // TODO(b/155688824): Clean up logic below.
+
+  TfLiteQuantization quantization_type = {};
+  const tflite::QuantizationParameters* src_quantization =
+      flatbuffer_tensor.quantization();
+
+  if (src_quantization != nullptr && src_quantization->scale() != nullptr &&
+      src_quantization->scale()->size() > 0) {
     // Always populate the TfLiteTensor.params field, even if there are
     // per-channel quantization parameters.
     result->params.scale = src_quantization->scale()->Get(0);
@@ -379,8 +383,10 @@ MicroAllocator::MicroAllocator(
     IPersistentBufferAllocator* persistent_buffer_allocator,
     INonPersistentBufferAllocator* non_persistent_buffer_allocator,
     MicroMemoryPlanner* memory_planner)
-    : non_persistent_buffer_allocator_(non_persistent_buffer_allocator),
-      persistent_buffer_allocator_(persistent_buffer_allocator),
+    : non_persistent_buffer_allocator_(
+          static_cast<SingleArenaBufferAllocator*>(non_persistent_buffer_allocator)),
+      persistent_buffer_allocator_(
+          static_cast<SingleArenaBufferAllocator*>(persistent_buffer_allocator)),
       memory_planner_(memory_planner),
       model_is_allocating_(false) {}
 
