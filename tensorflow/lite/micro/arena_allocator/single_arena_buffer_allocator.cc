@@ -105,8 +105,6 @@ TfLiteStatus SingleArenaBufferAllocator::ResizeBuffer(uint8_t* resizable_buf,
 uint8_t* SingleArenaBufferAllocator::AllocatePersistentBuffer(
     size_t size, size_t alignment) {
   uint8_t* const aligned_result = AlignPointerDown(tail_ - size, alignment);
-  MicroPrintf("[MWW ALLOC] AllocatePersistentBuffer head=%p tail=%p req=%u res=%p\n",
-              (void*)head_, (void*)tail_, (unsigned)size, (void*)aligned_result);
   if (aligned_result < head_) {
 #ifndef TF_LITE_STRIP_ERROR_STRINGS
     const size_t missing_memory = head_ - aligned_result;
@@ -125,8 +123,6 @@ uint8_t* SingleArenaBufferAllocator::AllocateTemp(size_t size,
                                                   size_t alignment) {
   uint8_t* const aligned_result = AlignPointerUp(temp_, alignment);
   const size_t available_memory = (tail_ >= aligned_result) ? (tail_ - aligned_result) : 0;
-  MicroPrintf("[MWW ALLOC] AllocateTemp temp=%p tail=%p req=%u avail=%u\n",
-              (void*)temp_, (void*)tail_, (unsigned)size, (unsigned)available_memory);
   if (available_memory < size) {
     MicroPrintf(
         "Failed to allocate temp memory. Requested: %u, "
